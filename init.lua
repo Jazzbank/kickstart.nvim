@@ -32,7 +32,8 @@ What is Kickstart?
     make Neovim your own! That might mean leaving Kickstart just the way it is for a while
     or immediately breaking it into modular pieces. It's up to you!
 
-    If you don't know anything about Lua, I recommend taking some time to read through
+    If you don't know anything about Lua, I recommend taking some time :wq
+    to read through
     a guide. One possible example which will only take 10-15 minutes:
       - https://learnxinyminutes.com/docs/lua/
 
@@ -91,7 +92,7 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
-vim.g.have_nerd_font = false
+vim.g.have_nerd_font = true
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
@@ -205,6 +206,26 @@ vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper win
 -- vim.keymap.set("n", "<C-S-j>", "<C-w>J", { desc = "Move window to the lower" })
 -- vim.keymap.set("n", "<C-S-k>", "<C-w>K", { desc = "Move window to the upper" })
 
+-- NOTE: Debugging commands.
+vim.keymap.set('n', '<F5>', function()
+  require('dap').continue()
+end)
+vim.keymap.set('n', '<F10>', function()
+  require('dap').step_over()
+end)
+vim.keymap.set('n', '<F11>', function()
+  require('dap').step_into()
+end)
+vim.keymap.set('n', '<F12>', function()
+  require('dap').step_out()
+end)
+vim.keymap.set('n', '<Leader>b', function()
+  require('dap').toggle_breakpoint()
+end)
+vim.keymap.set('n', '<Leader>du', function()
+  require('dapui').toggle()
+end)
+
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
 
@@ -246,6 +267,22 @@ rtp:prepend(lazypath)
 --
 -- NOTE: Here is where you install your plugins.
 require('lazy').setup({
+  -- NOTE: User added Lazy plugins (by me).
+  { 'rktjmp/lush.nvim' },
+  {
+    dir = '~/verdant',
+    name = 'verdant',
+    lazy = false, -- load it on startup
+    priority = 1000, -- make sure it loads before other plugins
+    config = function()
+      vim.cmd 'colorscheme verdant'
+    end,
+  },
+  { 'mfussenegger/nvim-dap' },
+  { 'jay-babu/mason-nvim-dap.nvim' },
+  { 'rcarriga/nvim-dap-ui' },
+  { 'nvim-neotest/nvim-nio' },
+  { 'mfussenegger/nvim-lint', event = 'VeryLazy' },
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
 
@@ -881,7 +918,7 @@ require('lazy').setup({
     -- change the command in the config to whatever the name of that colorscheme is.
     --
     -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-    'folke/tokyonight.nvim',
+    --[['folke/tokyonight.nvim',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
       ---@diagnostic disable-next-line: missing-fields
@@ -895,7 +932,7 @@ require('lazy').setup({
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
       vim.cmd.colorscheme 'tokyonight-night'
-    end,
+    end,--]]
   },
 
   -- Highlight todo, notes, etc in comments
@@ -1011,6 +1048,166 @@ require('lazy').setup({
     },
   },
 })
+
+-- NOTE: User defined code below. By me
+require 'custom.dap.codelldb'
+require 'custom.breakpoints'
+vim.keymap.set('n', '<Leader>bs', SaveBreakpoints, { desc = 'Save DAP breakpoints' })
+vim.keymap.set('n', '<Leader>bl', LoadBreakpoints, { desc = 'Load DAP breakpoints' })
+
+require('dapui').setup()
+
+local dap, dapui = require 'dap', require 'dapui'
+
+-- Open dap-ui automatically when debugging starts
+dap.listeners.after.event_initialized['dapui_config'] = function()
+  dapui.open()
+end
+
+-- Close dap-ui automatically when debugging stops or exits
+dap.listeners.before.event_terminated['dapui_config'] = function()
+  dapui.close()
+end
+dap.listeners.before.event_exited['dapui_config'] = function()
+  dapui.close()
+end
+
+require('lint').linters_by_ft = {
+  cpp = { 'clangtidy' },
+  c = { 'clangtidy' },
+}
+
+require('lspconfig').clangd.setup {
+  cmd = {
+    'clangd',
+    '--background-index',
+    '--clang-tidy',
+    '--clang-tidy-checks=*',
+    '--completion-style=detailed',
+    '--header-insertion-iwyu',
+  },
+}
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = '*',
+  callback = function()
+    vim.opt_local.formatoptions:remove { 'r', 'o' }
+  end,
+})
+
+vim.cmd 'compiler cargo'
+
+local ns_id = vim.api.nvim_create_namespace 'scratch-highlight'
+
+vim.api.nvim_set_hl(0, 'ScratchHint', { fg = '#3bfcff', bg = '', italic = true }) -- cyan, italic
+
+-- Highlight lines based on keywords
+local function highlight_lines(buf)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for i, line in ipairs(lines) do
+    if line:match 'help' then
+      vim.api.nvim_buf_set_extmark(buf, ns_id, i - 1, 0, {
+        end_col = #line,
+        hl_group = 'HintMsg',
+      })
+    elseif line:match 'warning' then
+      vim.api.nvim_buf_set_extmark(buf, ns_id, i - 1, 0, {
+        end_col = #line,
+        hl_group = 'WarningMsg',
+      })
+    elseif line:match 'error' then
+      vim.api.nvim_buf_set_extmark(buf, ns_id, i - 1, 0, {
+        end_col = #line,
+        hl_group = 'ErrorMsg',
+      })
+    else
+      vim.api.nvim_buf_set_extmark(buf, ns_id, i - 1, 0, { end_col = #line, hl_group = 'other' })
+    end
+  end
+end
+
+local function open_floating_output(lines)
+  local buf = vim.api.nvim_create_buf(false, true) -- create a new scratch buffer
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  highlight_lines(buf)
+
+  local width = math.floor(vim.o.columns * 0.7)
+  local height = math.floor(vim.o.lines * 0.5)
+
+  local opts = {
+    border = { '╔', '═', '╗', '║', '╝', '═', '╚', '║' },
+    style = 'minimal',
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = math.floor((vim.o.lines - height) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
+  }
+
+  vim.api.nvim_open_win(buf, true, opts)
+end
+
+local function run_rust_and_show_output()
+  local output = {}
+  vim.fn.jobstart({ 'cargo', 'run' }, {
+    stdout_buffered = true,
+    stderr_buffered = true,
+    on_stderr = function(_, data)
+      if data then
+        vim.list_extend(output, data)
+      end
+    end,
+    on_stdout = function(_, data)
+      if data then
+        vim.list_extend(output, data)
+      end
+    end,
+    on_exit = function()
+      -- Remove empty lines that may appear at the end
+      while #output > 0 and output[#output] == '' do
+        table.remove(output)
+      end
+      if #output == 0 then
+        output = { '[No output]' }
+      end
+      open_floating_output(output)
+    end,
+  })
+end
+
+vim.api.nvim_create_autocmd('BufWritePost', {
+  pattern = '*.rs',
+  callback = run_rust_and_show_output,
+})
+--]]
+
+--[[vim.api.nvim_create_autocmd('BufWritePost', {
+  pattern = '*.rs',
+  callback = function()
+    -- Open terminal in a split and run cargo run
+    vim.cmd 'split | terminal cargo run'
+    -- Get the window ID of the new terminal
+    local term_win = vim.api.nvim_get_current_win()
+    local term_buf = vim.api.nvim_get_current_buf()
+
+    -- Set up an autocommand to close the terminal window when you leave it
+    vim.api.nvim_create_autocmd('WinLeave', {
+      buffer = term_buf,
+      once = true,
+      callback = function()
+        -- Close the terminal window if it's still open
+        if vim.api.nvim_win_is_valid(term_win) then
+          vim.api.nvim_win_close(term_win, true)
+        end
+      end,
+    })
+  end,
+})--]]
+
+-- Example keybindings
+vim.keymap.set('n', '<A-i>', '<CMD>lua require("FTerm").toggle()<CR>')
+vim.keymap.set('t', '<A-i>', '<C-\\><C-n><CMD>lua require("FTerm").toggle()<CR>')
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
